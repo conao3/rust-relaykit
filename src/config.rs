@@ -20,7 +20,8 @@ pub struct TelegramConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BackendConfig {
-    pub url: String,
+    pub url: Option<String>,
+    pub command: Option<Vec<String>>,
 }
 
 impl Config {
@@ -60,4 +61,49 @@ impl TelegramConfig {
 
 fn default_poll_timeout_seconds() -> u64 {
     30
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_http_backend_config() {
+        let config: Config = toml::from_str(
+            r#"
+[telegram]
+token_env = "TELEGRAM_BOT_TOKEN"
+
+[backend]
+url = "http://127.0.0.1:8080/relaykit/events"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.backend.url.as_deref(),
+            Some("http://127.0.0.1:8080/relaykit/events")
+        );
+        assert!(config.backend.command.is_none());
+    }
+
+    #[test]
+    fn parses_jsonl_backend_config() {
+        let config: Config = toml::from_str(
+            r#"
+[telegram]
+token_env = "TELEGRAM_BOT_TOKEN"
+
+[backend]
+command = ["python3", "agent.py"]
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.backend.command.as_deref(),
+            Some(["python3".to_owned(), "agent.py".to_owned()].as_slice())
+        );
+        assert!(config.backend.url.is_none());
+    }
 }

@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
         Command::Serve { config } => {
             let config = Config::load(&config)?;
             let telegram = TelegramClient::from_config(&config.telegram)?;
-            let backend = BackendClient::new(config.backend);
+            let backend = BackendClient::new(config.backend)?;
             relaykit::serve::run(telegram, backend).await
         }
         Command::Telegram { command } => match command {

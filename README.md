@@ -29,6 +29,32 @@ token_env = "TELEGRAM_BOT_TOKEN"
 url = "http://127.0.0.1:8080/relaykit/events"
 ```
 
+For a JSONL CLI backend, set `command` instead of `url`:
+
+```toml
+[telegram]
+token_env = "TELEGRAM_BOT_TOKEN"
+
+[backend]
+command = ["python3", "agent.py"]
+```
+
+RelayKit writes one normalized event JSON object plus a newline to the backend process stdin. The backend writes one reply batch JSON object plus a newline to stdout.
+
+Backend stdin JSONL:
+
+```json
+{"id":"telegram:123","platform":"telegram","chat":{"id":"123456","kind":"dm","title":null,"thread_id":null},"sender":null,"message":{"id":"123","text":"hello","timestamp":1787518050},"raw":{}}
+```
+
+Backend stdout JSONL:
+
+```json
+{"messages":[{"text":"hello back","chat_id":null,"thread_id":null,"reply_to_message_id":"123"}]}
+```
+
+The backend may write an empty line or no line for no reply.
+
 Run RelayKit:
 
 ```sh
