@@ -65,7 +65,7 @@ impl TelegramClient {
         thread_id: Option<&str>,
         text: &str,
         reply_to_message_id: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<Value> {
         let mut payload = json!({
             "chat_id": chat_id,
             "text": text
@@ -90,7 +90,7 @@ impl TelegramClient {
             .await
             .context("failed to parse Telegram sendMessage response")?;
 
-        response.into_result("sendMessage").map(|_| ())
+        response.into_result("sendMessage")
     }
 
     fn method_url(&self, method: &str) -> Result<Url> {

@@ -1,70 +1,251 @@
-use anyhow::Result;
-use clap::{Parser, Subcommand};
+mod error;
+mod grammar;
+mod output;
+
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use relaykit::{backend::BackendClient, config::Config, telegram::TelegramClient};
-use std::path::PathBuf;
+use serde::Serialize;
+use serde_json::Value;
+use std::path::{Path, PathBuf};
 use tracing_subscriber::{EnvFilter, fmt};
 
-#[derive(Debug, Parser)]
-#[command(name = "relaykit")]
-#[command(about = "Language-neutral communication gateway for AI agents")]
+use error::{Result, other, parameter, target};
+use grammar::{CliInputArgs, SkeletonKind};
+use output::{OutputFormat, Response};
+
+#[derive(Parser)]
+#[command(
+    name = "relaykit",
+    version,
+    about = "Language-neutral communication gateway for AI agents"
+)]
 struct Cli {
+    /// Output format
+    #[arg(long, global = true, help_heading = "Global Options", value_enum, default_value_t = OutputFormat::Json)]
+    output: OutputFormat,
+    /// JMESPath expression applied to the output
+    #[arg(
+        long,
+        global = true,
+        help_heading = "Global Options",
+        value_name = "JMESPATH"
+    )]
+    query: Option<String>,
+    /// Print debug logs to stderr
+    #[arg(long, global = true, help_heading = "Global Options")]
+    debug: bool,
     #[command(subcommand)]
     command: Command,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Subcommand)]
 enum Command {
-    Serve {
-        #[arg(short, long, default_value = "relaykit.toml")]
-        config: PathBuf,
-    },
-    Telegram {
-        #[command(subcommand)]
-        command: TelegramCommand,
-    },
+    /// Run the gateway between the messaging platform and the backend
+    #[command(subcommand)]
+    Gateway(GatewayCommand),
+    /// Call the Telegram Bot API directly
+    #[command(subcommand)]
+    Telegram(TelegramCommand),
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Subcommand)]
+enum GatewayCommand {
+    /// Poll Telegram updates, post each normalized event to the backend, and send its replies until interrupted
+    #[command(name = "start-gateway")]
+    Start(ConfigFileArgs),
+}
+
+#[derive(Subcommand)]
 enum TelegramCommand {
-    Send {
-        #[arg(short, long, default_value = "relaykit.toml")]
-        config: PathBuf,
-        #[arg(long)]
-        chat_id: String,
-        #[arg(long)]
-        text: String,
-        #[arg(long)]
-        thread_id: Option<String>,
-    },
+    /// Send one Telegram message
+    #[command(name = "send-message")]
+    Send(SendMessageArgs),
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("relaykit=info".parse()?))
-        .init();
+#[derive(Args)]
+struct ConfigFileArgs {
+    /// Path of the RelayKit TOML config
+    #[arg(long, default_value = "relaykit.toml")]
+    config_file: PathBuf,
+    #[command(flatten)]
+    input: CliInputArgs,
+}
 
-    match Cli::parse().command {
-        Command::Serve { config } => {
-            let config = Config::load(&config)?;
-            let telegram = TelegramClient::from_config(&config.telegram)?;
-            let backend = BackendClient::new(config.backend)?;
-            relaykit::serve::run(telegram, backend).await
+#[derive(Args)]
+struct SendMessageArgs {
+    /// Path of the RelayKit TOML config
+    #[arg(long, default_value = "relaykit.toml")]
+    config_file: PathBuf,
+    /// Telegram chat ID
+    #[arg(long)]
+    chat_id: String,
+    /// Message text
+    #[arg(long)]
+    text: String,
+    /// Telegram forum topic ID (message_thread_id)
+    #[arg(long)]
+    thread_id: Option<String>,
+    #[command(flatten)]
+    input: CliInputArgs,
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "PascalCase")]
+struct SendMessageReport {
+    chat_id: String,
+    thread_id: Option<String>,
+    message_id: Option<String>,
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "PascalCase")]
+struct StartGatewayReport {
+    stopped_by: String,
+}
+
+fn main() {
+    let code = match run() {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("error: {error}");
+            error.exit_code()
         }
-        Command::Telegram { command } => match command {
-            TelegramCommand::Send {
-                config,
-                chat_id,
-                text,
-                thread_id,
-            } => {
-                let config = Config::load(&config)?;
-                let telegram = TelegramClient::from_config(&config.telegram)?;
-                telegram
-                    .send_message(&chat_id, thread_id.as_deref(), &text, None)
-                    .await?;
-                Ok(())
-            }
-        },
+    };
+    std::process::exit(code);
+}
+
+fn to_value<T: Serialize>(value: &T) -> Result<Value> {
+    serde_json::to_value(value).map_err(|error| other(error.to_string()))
+}
+
+fn target_error(error: anyhow::Error) -> error::Error {
+    target(format!("{error:#}"))
+}
+
+fn output_skeleton(path: &[String]) -> Result<Value> {
+    match path.last().map(String::as_str) {
+        Some("start-gateway") => to_value(&StartGatewayReport::default()),
+        Some("send-message") => to_value(&SendMessageReport::default()),
+        _ => Err(parameter(
+            "--generate-cli-skeleton needs a command and a subcommand",
+        )),
     }
+}
+
+fn load(config_file: &Path) -> Result<Config> {
+    Config::load(config_file).map_err(target_error)
+}
+
+fn runtime() -> Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| other(error.to_string()))
+}
+
+fn run() -> Result<()> {
+    let mut root = Cli::command();
+    root.build();
+    let prepared = grammar::prepare(&root, std::env::args_os().collect())?;
+    let debug = prepared.argv.iter().any(|token| token == "--debug");
+
+    if let Some(kind) = prepared.skeleton {
+        let mut command = &root;
+        for name in &prepared.path {
+            command = command
+                .find_subcommand(name)
+                .ok_or_else(|| other(format!("unknown subcommand {name}")))?;
+        }
+        if command.has_subcommands() {
+            return Err(parameter(
+                "--generate-cli-skeleton needs a command and a subcommand",
+            ));
+        }
+        let value = match kind {
+            SkeletonKind::Input => grammar::input_skeleton(command),
+            SkeletonKind::Output => output_skeleton(&prepared.path)?,
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|error| other(error.to_string()))?
+        );
+        return Ok(());
+    }
+
+    let cli = match Cli::try_parse_from(&prepared.argv) {
+        Ok(cli) => cli,
+        Err(error) => {
+            let code = if error.use_stderr() { 252 } else { 0 };
+            let _ = error.print();
+            std::process::exit(code);
+        }
+    };
+
+    if let Some(query) = &cli.query {
+        output::compile_query(query)?;
+    }
+    let directive = if debug {
+        "relaykit=debug"
+    } else {
+        "relaykit=info"
+    };
+    fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            EnvFilter::from_default_env().add_directive(
+                directive
+                    .parse()
+                    .map_err(|error| other(format!("{error}")))?,
+            ),
+        )
+        .init();
+    if debug {
+        tracing::debug!(argv = ?&prepared.argv[1..], "parsed arguments");
+    }
+
+    let (name, value) = match cli.command {
+        Command::Gateway(GatewayCommand::Start(args)) => {
+            let config = load(&args.config_file)?;
+            let telegram = TelegramClient::from_config(&config.telegram).map_err(target_error)?;
+            let backend = BackendClient::new(config.backend).map_err(target_error)?;
+            runtime()?
+                .block_on(relaykit::serve::run(telegram, backend))
+                .map_err(target_error)?;
+            let report = StartGatewayReport {
+                stopped_by: "SIGINT".to_owned(),
+            };
+            ("start-gateway", to_value(&report)?)
+        }
+        Command::Telegram(TelegramCommand::Send(args)) => {
+            let config = load(&args.config_file)?;
+            let telegram = TelegramClient::from_config(&config.telegram).map_err(target_error)?;
+            let message = runtime()?
+                .block_on(telegram.send_message(
+                    &args.chat_id,
+                    args.thread_id.as_deref(),
+                    &args.text,
+                    None,
+                ))
+                .map_err(target_error)?;
+            let report = SendMessageReport {
+                chat_id: args.chat_id,
+                thread_id: args.thread_id,
+                message_id: message.get("message_id").map(|id| match id {
+                    Value::String(id) => id.clone(),
+                    id => id.to_string(),
+                }),
+            };
+            ("send-message", to_value(&report)?)
+        }
+    };
+    print!(
+        "{}",
+        output::render(
+            &grammar::pascal_case(name),
+            Response { value, text: None },
+            cli.output,
+            cli.query.as_deref()
+        )?
+    );
+    Ok(())
 }

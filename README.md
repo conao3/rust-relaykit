@@ -58,14 +58,32 @@ The backend may write an empty line or no line for no reply.
 Run RelayKit:
 
 ```sh
-relaykit serve --config relaykit.toml
+relaykit gateway start-gateway --config-file relaykit.toml
 ```
 
 Send an outbound Telegram message directly:
 
 ```sh
-relaykit telegram send --chat-id 123456 --text 'hello from RelayKit'
+relaykit telegram send-message --config-file relaykit.toml --chat-id 123456 --text 'hello from RelayKit'
 ```
+
+## CLI
+
+The CLI takes input in the AWS CLI grammar: `relaykit [global options] <command> <subcommand> [--parameter value ...]`.
+
+| Command | Parameters | Output |
+|---|---|---|
+| `gateway start-gateway` | `--config-file` (default `relaykit.toml`) | Runs until SIGINT, then prints `{"StoppedBy": "SIGINT"}` |
+| `telegram send-message` | `--config-file` (default `relaykit.toml`), `--chat-id`, `--text`, `--thread-id` | `{"ChatId": "...", "ThreadId": null, "MessageId": "..."}` |
+
+- Every parameter is a named `--kebab-case` option. There are no positional arguments.
+- A value starting with `file://` is replaced by the content of that file (for example `--text file://message.txt`). Read stdin with `file:///dev/stdin`.
+- `--cli-input-json file://input.json` passes all parameters as a JSON object keyed by the PascalCase parameter names (`ConfigFile`, `ChatId`, `Text`, `ThreadId`). Parameters given on the command line take precedence.
+- `--generate-cli-skeleton input|output` prints the input or output skeleton.
+- Global options: `--output json|text|table` (default `json`), `--query <JMESPath>`, `--debug` (debug logs on stderr), `--version`.
+- `help` works at every level: `relaykit help`, `relaykit telegram help`, `relaykit telegram send-message help`.
+- `gateway start-gateway` is a long-running process. It writes its logs to stderr and prints its result only when it stops.
+- Exit codes: `0` success, `252` syntax or parameter error, `254` the config cannot be read or is incomplete, or Telegram rejected the call, `255` other failures.
 
 ## Backend event protocol
 
@@ -117,7 +135,8 @@ Use the Nix dev shell for Rust tooling:
 ```sh
 nix develop -c cargo fmt --check
 nix develop -c cargo check
-nix develop -c cargo clippy -- -D warnings
+nix develop -c cargo clippy --all-targets -- -D warnings
+nix develop -c cargo test
 ```
 
 ## License

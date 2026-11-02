@@ -84,4 +84,5 @@ async fn send_reply(
             reply.reply_to_message_id.as_deref(),
         )
         .await
+        .map(|_| ())
 }
