@@ -5,11 +5,13 @@ use tracing::{error, info, warn};
 
 pub async fn run(telegram: TelegramClient, backend: BackendClient) -> Result<()> {
     let mut offset = None;
+    let shutdown = tokio::signal::ctrl_c();
+    tokio::pin!(shutdown);
     info!("relaykit gateway started");
 
     loop {
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
+            _ = &mut shutdown => {
                 info!("shutdown signal received");
                 return Ok(());
             }
@@ -18,7 +20,13 @@ pub async fn run(telegram: TelegramClient, backend: BackendClient) -> Result<()>
                     Ok(next_offset) => offset = next_offset,
                     Err(error) => {
                         error!(%error, "poll iteration failed");
-                        sleep(Duration::from_secs(2)).await;
+                        tokio::select! {
+                            _ = &mut shutdown => {
+                                info!("shutdown signal received");
+                                return Ok(());
+                            }
+                            _ = sleep(Duration::from_secs(2)) => {}
+                        }
                     }
                 }
             }
