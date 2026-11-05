@@ -9,8 +9,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tracing_subscriber::{EnvFilter, fmt};
 
-use error::{Result, other, parameter, target};
-use grammar::{CliInputArgs, SkeletonKind};
+use error::{Result, other, target};
 use output::{OutputFormat, Response};
 
 #[derive(Parser)]
@@ -23,14 +22,6 @@ struct Cli {
     /// Output format
     #[arg(long, global = true, help_heading = "Global Options", value_enum, default_value_t = OutputFormat::Json)]
     output: OutputFormat,
-    /// JMESPath expression applied to the output
-    #[arg(
-        long,
-        global = true,
-        help_heading = "Global Options",
-        value_name = "JMESPATH"
-    )]
-    query: Option<String>,
     /// Print debug logs to stderr
     #[arg(long, global = true, help_heading = "Global Options")]
     debug: bool,
@@ -67,8 +58,6 @@ struct ConfigFileArgs {
     /// Path of the RelayKit TOML config
     #[arg(long, default_value = "relaykit.toml")]
     config_file: PathBuf,
-    #[command(flatten)]
-    input: CliInputArgs,
 }
 
 #[derive(Args)]
@@ -85,11 +74,9 @@ struct SendMessageArgs {
     /// Telegram forum topic ID (message_thread_id)
     #[arg(long)]
     thread_id: Option<String>,
-    #[command(flatten)]
-    input: CliInputArgs,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct SendMessageReport {
     chat_id: String,
@@ -97,7 +84,7 @@ struct SendMessageReport {
     message_id: Option<String>,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct StartGatewayReport {
     stopped_by: String,
@@ -122,16 +109,6 @@ fn target_error(error: anyhow::Error) -> error::Error {
     target(format!("{error:#}"))
 }
 
-fn output_skeleton(path: &[String]) -> Result<Value> {
-    match path.last().map(String::as_str) {
-        Some("start-gateway") => to_value(&StartGatewayReport::default()),
-        Some("send-message") => to_value(&SendMessageReport::default()),
-        _ => Err(parameter(
-            "--generate-cli-skeleton needs a command and a subcommand",
-        )),
-    }
-}
-
 fn load(config_file: &Path) -> Result<Config> {
     Config::load(config_file).map_err(target_error)
 }
@@ -146,33 +123,10 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
 fn run() -> Result<()> {
     let mut root = Cli::command();
     root.build();
-    let prepared = grammar::prepare(&root, std::env::args_os().collect())?;
-    let debug = prepared.argv.iter().any(|token| token == "--debug");
+    let argv = grammar::prepare(&root, std::env::args_os().collect())?;
+    let debug = argv.iter().any(|token| token == "--debug");
 
-    if let Some(kind) = prepared.skeleton {
-        let mut command = &root;
-        for name in &prepared.path {
-            command = command
-                .find_subcommand(name)
-                .ok_or_else(|| other(format!("unknown subcommand {name}")))?;
-        }
-        if command.has_subcommands() {
-            return Err(parameter(
-                "--generate-cli-skeleton needs a command and a subcommand",
-            ));
-        }
-        let value = match kind {
-            SkeletonKind::Input => grammar::input_skeleton(command),
-            SkeletonKind::Output => output_skeleton(&prepared.path)?,
-        };
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&value).map_err(|error| other(error.to_string()))?
-        );
-        return Ok(());
-    }
-
-    let cli = match Cli::try_parse_from(&prepared.argv) {
+    let cli = match Cli::try_parse_from(&argv) {
         Ok(cli) => cli,
         Err(error) => {
             let code = if error.use_stderr() { 252 } else { 0 };
@@ -181,9 +135,6 @@ fn run() -> Result<()> {
         }
     };
 
-    if let Some(query) = &cli.query {
-        output::compile_query(query)?;
-    }
     let directive = if debug {
         "relaykit=debug"
     } else {
@@ -200,7 +151,7 @@ fn run() -> Result<()> {
         )
         .init();
     if debug {
-        tracing::debug!(argv = ?&prepared.argv[1..], "parsed arguments");
+        tracing::debug!(argv = ?&argv[1..], "parsed arguments");
     }
 
     let (name, value) = match cli.command {
@@ -243,8 +194,7 @@ fn run() -> Result<()> {
         output::render(
             &grammar::pascal_case(name),
             Response { value, text: None },
-            cli.output,
-            cli.query.as_deref()
+            cli.output
         )?
     );
     Ok(())

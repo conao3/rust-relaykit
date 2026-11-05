@@ -78,9 +78,7 @@ The CLI takes input in the AWS CLI grammar: `relaykit [global options] <command>
 
 - Every parameter is a named `--kebab-case` option. There are no positional arguments.
 - A value starting with `file://` is replaced by the content of that file (for example `--text file://message.txt`). Read stdin with `file:///dev/stdin`.
-- `--cli-input-json file://input.json` passes all parameters as a JSON object keyed by the PascalCase parameter names (`ConfigFile`, `ChatId`, `Text`, `ThreadId`). Parameters given on the command line take precedence.
-- `--generate-cli-skeleton input|output` prints the input or output skeleton.
-- Global options: `--output json|text|table` (default `json`), `--query <JMESPath>`, `--debug` (debug logs on stderr), `--version`.
+- Global options: `--output json|text|table` (default `json`), `--debug` (debug logs on stderr), `--version`.
 - `help` works at every level: `relaykit help`, `relaykit telegram help`, `relaykit telegram send-message help`.
 - `gateway start-gateway` is a long-running process. It writes its logs to stderr and prints its result only when it stops.
 - Exit codes: `0` success, `252` syntax or parameter error, `254` the config cannot be read or is incomplete, or Telegram rejected the call, `255` other failures.
