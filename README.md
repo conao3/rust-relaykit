@@ -1,21 +1,49 @@
+<p align="center">
+  <img src="docs/assets/banner.png" alt="RelayKit, a language-neutral communication gateway for AI agents" width="880">
+</p>
+
+<p align="center"><strong>A language-neutral communication gateway for AI agents</strong></p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/conao3/rust-relaykit" alt="License: Apache-2.0"></a>
+  <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rust-edition%202024-orange" alt="Rust edition 2024"></a>
+  <a href="https://github.com/conao3/rust-relaykit/stargazers"><img src="https://img.shields.io/github/stars/conao3/rust-relaykit?style=flat" alt="GitHub stars"></a>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#cli">CLI</a> ·
+  <a href="#backend-event-protocol">Backend protocol</a> ·
+  <a href="#development">Development</a>
+</p>
+
 # RelayKit
 
-RelayKit is a language-neutral communication gateway for AI agents. It connects messaging platforms to any backend through small JSON protocols instead of binding the application to one SDK or programming language.
+RelayKit connects messaging platforms to an AI agent backend that you write in any language. RelayKit and your backend talk through small JSON protocols, so your application depends on no platform SDK.
 
-The first-party platform adapter is Telegram.
+The first-party platform adapter is Telegram. RelayKit polls the Telegram Bot API, sends each message to your backend as a normalized JSON event, and posts your backend's replies back to the chat.
 
 ## Architecture
 
 ```text
 Telegram Bot API
-  -> relaykit serve
+  -> relaykit gateway start-gateway
   -> normalized JSON event
   -> HTTP backend
   -> normalized reply JSON
   -> Telegram Bot API
 ```
 
-Backends can be written in any language that can receive HTTP JSON.
+You can write the backend in any language that receives HTTP JSON. A command that reads and writes JSON lines on stdin and stdout also works as a backend.
+
+## Install
+
+RelayKit is a Rust crate with one binary, `relaykit`. Build and install it with Cargo:
+
+```sh
+cargo install --git https://github.com/conao3/rust-relaykit
+```
 
 ## Quick start
 
@@ -53,7 +81,7 @@ Backend stdout JSONL:
 {"messages":[{"text":"hello back","chat_id":null,"thread_id":null,"reply_to_message_id":"123"}]}
 ```
 
-The backend may write an empty line or no line for no reply.
+To send no reply, the backend writes an empty line or no line.
 
 Run RelayKit:
 
@@ -61,7 +89,7 @@ Run RelayKit:
 relaykit gateway start-gateway --config-file relaykit.toml
 ```
 
-Send an outbound Telegram message directly:
+Send an outbound Telegram message from the command line:
 
 ```sh
 relaykit telegram send-message --config-file relaykit.toml --chat-id 123456 --text 'hello from RelayKit'
@@ -76,12 +104,12 @@ The CLI takes input in the AWS CLI grammar: `relaykit [global options] <command>
 | `gateway start-gateway` | `--config-file` (default `relaykit.toml`) | Runs until SIGINT, then prints `{"StoppedBy": "SIGINT"}` |
 | `telegram send-message` | `--config-file` (default `relaykit.toml`), `--chat-id`, `--text`, `--thread-id` | `{"ChatId": "...", "ThreadId": null, "MessageId": "..."}` |
 
-- Every parameter is a named `--kebab-case` option. There are no positional arguments.
-- A value starting with `file://` is replaced by the content of that file (for example `--text file://message.txt`). Read stdin with `file:///dev/stdin`.
+- Each parameter is a named `--kebab-case` option. RelayKit takes no positional arguments.
+- RelayKit replaces a value starting with `file://` with the content of that file (for example `--text file://message.txt`). Read stdin with `file:///dev/stdin`.
 - Global options: `--output json|text|table` (default `json`), `--debug` (debug logs on stderr), `--version`.
-- `help` works at every level: `relaykit help`, `relaykit telegram help`, `relaykit telegram send-message help`.
-- `gateway start-gateway` is a long-running process. It writes its logs to stderr and prints its result only when it stops.
-- Exit codes: `0` success, `252` syntax or parameter error, `254` the config cannot be read or is incomplete, or Telegram rejected the call, `255` other failures.
+- `help` works at each level: `relaykit help`, `relaykit telegram help`, `relaykit telegram send-message help`.
+- `gateway start-gateway` runs as a long-lived process. It writes its logs to stderr and prints its result when it stops.
+- Exit codes: `0` success, `252` syntax or parameter error, `254` RelayKit cannot read the config, the config is incomplete, or Telegram rejected the call, `255` other failures.
 
 ## Backend event protocol
 
@@ -111,7 +139,7 @@ RelayKit posts a normalized event to the configured backend URL:
 }
 ```
 
-The backend may return replies immediately:
+The backend may return replies in the response body:
 
 ```json
 {
@@ -131,6 +159,7 @@ An empty body, `204 No Content`, or an empty `messages` list means no reply.
 Use the Nix dev shell for Rust tooling:
 
 ```sh
+nix flake check --show-trace
 nix develop -c cargo fmt --check
 nix develop -c cargo check
 nix develop -c cargo clippy --all-targets -- -D warnings
@@ -139,4 +168,4 @@ nix develop -c cargo test
 
 ## License
 
-Apache-2.0
+Apache-2.0. See [LICENSE](LICENSE).
