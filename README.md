@@ -11,10 +11,10 @@
 </p>
 
 <p align="center">
-  <a href="#install">Install</a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#cli">CLI</a> ·
-  <a href="#backend-event-protocol">Backend protocol</a> ·
+  <a href="#install">Install</a> |
+  <a href="#quick-start">Quick start</a> |
+  <a href="#cli">CLI</a> |
+  <a href="#backend-event-protocol">Backend protocol</a> |
   <a href="#development">Development</a>
 </p>
 
